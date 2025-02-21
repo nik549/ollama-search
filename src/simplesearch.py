@@ -43,7 +43,7 @@ class SimpleSearch:
             return ""
 
     def get_search_context(self, search_query):
-        """Fetch search results from the cloud service and return URLs and content."""
+        """Fetch search results from the cloud service and return URLs and summarized content."""
         try:
             response = requests.post(
                 f"{self.cloud_service_url}/process",
@@ -61,22 +61,16 @@ class SimpleSearch:
                 return [], "No relevant information found."
 
             urls = [context['url'] for context in contexts]
-            # Extract just titles and snippets to reduce content size
-            processed_content = []
-            for c in contexts:
-                # Extract first 2-3 sentences or ~150 characters max from content
-                content_preview = ' '.join(c['content'].split('.')[:2]) + '.'
-                if len(content_preview) > 150:
-                    content_preview = content_preview[:147] + '...'
-                processed_content.append(f"{c['url']}\n{content_preview}")
-                
-            context_str = "\n\n".join(processed_content)
+            context_str = "\n\n".join(
+                f"{c['url']}\n{c['content']}" for c in contexts
+            )
+
             return urls, context_str
         except Exception as e:
             return [], f"Error during search: {e}"
 
     def process_query(self, query):
-        """Handles queries starting with '/' by generating search queries and fetching condensed results."""
+        """Handles queries that start with '/' by generating search queries, fetching results, streaming summaries, and responding."""
         query = query[1:].strip()  # Remove the '/' and trim whitespace
         if not query:
             print("❌ Error: Query cannot be empty.")
@@ -101,17 +95,14 @@ class SimpleSearch:
         for sq in search_queries:
             print(f"- {sq}")
 
-        # Step 2: Collect all search results in an optimized format
-        all_urls = []
-        all_contexts = []
-        
+        summaries = []
+        formatted_answers = []
+
+        # Step 2: Get search results and stream summaries
         for i, sq in enumerate(search_queries, 1):
             print(f"\n📖 **Google Query {i}:** {sq}")
 
             urls, context_str = self.get_search_context(sq)
-            all_urls.extend(urls)
-            all_contexts.append(f"Search Query: {sq}\n{context_str}")
-            
             print("🔗 **Links:**")
             if urls:
                 for url in urls:
@@ -119,17 +110,19 @@ class SimpleSearch:
             else:
                 print("No links found.")
 
-        # Step 3: Prepare the final prompt with clear instructions to reduce hallucination
-        final_prompt = (
-            f"📌 **User Query:** {query}\n\n"
-            f"📚 **Search Context:**\n\n{' '.join(all_contexts)}\n\n"
-            f"🔍 **Instructions:**\n"
-            f"1. Use ONLY information from the provided search results to answer the query\n"
-            f"2. If the search results don't contain enough information, acknowledge this limitation\n"
-            f"3. DO NOT make up information not present in the search results\n"
-            f"4. Cite sources when possible using [URL] notation\n\n"
-            f"✍️ **Please provide a factual answer to the original query based STRICTLY on the provided information.**"
-        )
+            # Start streaming summary immediately
+            print("📝 **Summary:** ", end="", flush=True)
+            summary = self.call_ollama(
+                f"Summarize the following search results:\n\n{context_str}",
+                stream=True
+            )
+            summaries.append(summary)
+
+        # Step 3: Prepare the final prompt
+        final_prompt = f"📌 **User Query:** {query}\n\n"
+        for i, summary in enumerate(summaries, start=1):
+            final_prompt += f"\n🔎 **Query {i}:** {search_queries[i-1]}\n📄 **Summary:** {summary}\n"
+        final_prompt += "\n✍️ **Now, think deeply and provide a detailed answer based on the provided information.**"
 
         print("\n🤖 **Generating final response...**")
-        return self.call_ollama(final_prompt, stream=True)
+        return self.call_ollama(final_prompt, stream=True)  # STREAM FINAL ANSWER
