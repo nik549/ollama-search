@@ -17,7 +17,7 @@ Before you begin, ensure you have the following installed and configured:
 1. **Clone the Repository**
 
    ```bash
-   git clone https://github.com/nik549/ollama-search-.git
+   git clone https://github.com/nik549/ollama-search.git
    ```
 
 2. **Install Python Dependencies**
